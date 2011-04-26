@@ -12,12 +12,13 @@ LOCAL_SRC_FILES:= \
 	server.c
 
 LOCAL_CFLAGS:= \
-	-DVERSION=\"4.69\" \
+	-DVERSION=\"4.47\" \
 	-DSTORAGEDIR=\"/data/misc/bluetoothd\" \
-	-DCONFIGDIR=\"/etc/bluetooth\"
+	-DCONFIGDIR=\"/etc/bluez\"
 
 LOCAL_C_INCLUDES:= \
-	$(LOCAL_PATH)/../lib \
+	$(LOCAL_PATH)/../include \
+	$(LOCAL_PATH)/../common \
 	$(LOCAL_PATH)/../src \
 	$(LOCAL_PATH)/../gdbus \
 	$(call include-path-for, glib) \

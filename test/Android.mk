@@ -9,17 +9,17 @@ BUILD_HCIEMU:=0
 include $(CLEAR_VARS)
 
 LOCAL_CFLAGS:= \
-	-DVERSION=\"4.69\"
+	-DVERSION=\"4.47\"
 
 LOCAL_SRC_FILES:= \
 	hstest.c
 
 LOCAL_C_INCLUDES:= \
-	$(LOCAL_PATH)/../lib \
-	$(LOCAL_PATH)/../src
+	$(LOCAL_PATH)/../include \
+	$(LOCAL_PATH)/../common
 
 LOCAL_SHARED_LIBRARIES := \
-	libbluetoothd libbluetooth
+	libbluetooth
 
 LOCAL_MODULE_PATH := $(TARGET_OUT_OPTIONAL_EXECUTABLES)
 LOCAL_MODULE_TAGS := eng
@@ -34,17 +34,17 @@ include $(BUILD_EXECUTABLE)
 include $(CLEAR_VARS)
 
 LOCAL_CFLAGS:= \
-	-DVERSION=\"4.69\"
+	-DVERSION=\"4.47\"
 
 LOCAL_SRC_FILES:= \
 	l2test.c
 
 LOCAL_C_INCLUDES:= \
-	$(LOCAL_PATH)/../lib \
-	$(LOCAL_PATH)/../src
+	$(LOCAL_PATH)/../include \
+	$(LOCAL_PATH)/../common
 
 LOCAL_SHARED_LIBRARIES := \
-	libbluetoothd libbluetooth
+	libbluetooth
 
 LOCAL_MODULE_PATH := $(TARGET_OUT_OPTIONAL_EXECUTABLES)
 LOCAL_MODULE_TAGS := eng
@@ -59,17 +59,17 @@ include $(BUILD_EXECUTABLE)
 include $(CLEAR_VARS)
 
 LOCAL_CFLAGS:= \
-	-DVERSION=\"4.69\"
+	-DVERSION=\"4.47\"
 
 LOCAL_SRC_FILES:= \
 	rctest.c
 
 LOCAL_C_INCLUDES:= \
-	$(LOCAL_PATH)/../lib \
-	$(LOCAL_PATH)/../src
+	$(LOCAL_PATH)/../include \
+	$(LOCAL_PATH)/../common
 
 LOCAL_SHARED_LIBRARIES := \
-	libbluetoothd libbluetooth
+	libbluetooth
 
 LOCAL_MODULE_PATH := $(TARGET_OUT_OPTIONAL_EXECUTABLES)
 LOCAL_MODULE_TAGS := eng
@@ -85,17 +85,17 @@ include $(BUILD_EXECUTABLE)
 include $(CLEAR_VARS)
 
 LOCAL_CFLAGS:= \
-	-DVERSION=\"4.69\"
+	-DVERSION=\"4.47\"
 
 LOCAL_SRC_FILES:= \
 	scotest.c
 
 LOCAL_C_INCLUDES:= \
-	$(LOCAL_PATH)/../lib \
-	$(LOCAL_PATH)/../src
+	$(LOCAL_PATH)/../include \
+	$(LOCAL_PATH)/../common
 
 LOCAL_SHARED_LIBRARIES := \
-	libbluetoothd libbluetooth
+	libbluetooth
 
 LOCAL_MODULE_PATH := $(TARGET_OUT_OPTIONAL_EXECUTABLES)
 LOCAL_MODULE_TAGS := eng
@@ -110,14 +110,14 @@ include $(BUILD_EXECUTABLE)
 include $(CLEAR_VARS)
 
 LOCAL_CFLAGS:= \
-	-DVERSION=\"4.69\"
+	-DVERSION=\"4.47\"
 
 LOCAL_SRC_FILES:= \
 	agent.c
 
 LOCAL_C_INCLUDES:= \
-	$(LOCAL_PATH)/../lib \
-	$(LOCAL_PATH)/../src \
+	$(LOCAL_PATH)/../include \
+	$(LOCAL_PATH)/../common \
 	$(call include-path-for, dbus)
 
 LOCAL_SHARED_LIBRARIES := \
@@ -136,17 +136,17 @@ include $(BUILD_EXECUTABLE)
 include $(CLEAR_VARS)
 
 LOCAL_CFLAGS:= \
-	-DVERSION=\"4.69\"
+	-DVERSION=\"4.47\"
 
 LOCAL_SRC_FILES:= \
 	attest.c
 
 LOCAL_C_INCLUDES:= \
-	$(LOCAL_PATH)/../lib \
-	$(LOCAL_PATH)/../src
+	$(LOCAL_PATH)/../include \
+	$(LOCAL_PATH)/../common
 
 LOCAL_SHARED_LIBRARIES := \
-	libbluetoothd libbluetooth
+	libbluetooth
 
 LOCAL_MODULE_PATH := $(TARGET_OUT_OPTIONAL_EXECUTABLES)
 LOCAL_MODULE_TAGS := eng
@@ -161,17 +161,17 @@ include $(BUILD_EXECUTABLE)
 include $(CLEAR_VARS)
 
 LOCAL_CFLAGS:= \
-	-DVERSION=\"4.69\"
+	-DVERSION=\"4.47\"
 
 LOCAL_SRC_FILES:= \
 	avtest.c
 
 LOCAL_C_INCLUDES:= \
-	$(LOCAL_PATH)/../lib \
-	$(LOCAL_PATH)/../src
+	$(LOCAL_PATH)/../include \
+	$(LOCAL_PATH)/../common
 
 LOCAL_SHARED_LIBRARIES := \
-	libbluetoothd libbluetooth
+	libbluetooth
 
 LOCAL_MODULE_PATH := $(TARGET_OUT_OPTIONAL_EXECUTABLES)
 LOCAL_MODULE_TAGS := eng
@@ -186,17 +186,20 @@ include $(BUILD_EXECUTABLE)
 include $(CLEAR_VARS)
 
 LOCAL_CFLAGS:= \
-	-DVERSION=\"4.69\"
+	-DVERSION=\"4.47\"
 
 LOCAL_SRC_FILES:= \
 	bdaddr.c
 
 LOCAL_C_INCLUDES:= \
-	$(LOCAL_PATH)/../lib \
-	$(LOCAL_PATH)/../src
+	$(LOCAL_PATH)/../include \
+	$(LOCAL_PATH)/../common
 
 LOCAL_SHARED_LIBRARIES := \
-	libbluetoothd libbluetooth
+	libbluetooth
+
+LOCAL_STATIC_LIBRARIES := \
+	libbluez-common-static
 
 LOCAL_MODULE_PATH := $(TARGET_OUT_OPTIONAL_EXECUTABLES)
 LOCAL_MODULE_TAGS := eng
@@ -212,22 +215,23 @@ ifeq ($(BUILD_BTIOTEST),1)
 include $(CLEAR_VARS)
 
 LOCAL_CFLAGS:= \
-	-DVERSION=\"4.69\"
+	-DVERSION=\"4.47\"
 
 LOCAL_SRC_FILES:= \
 	btiotest.c
 
 LOCAL_C_INCLUDES:= \
-	$(LOCAL_PATH)/../lib \
-	$(LOCAL_PATH)/../src \
+	$(LOCAL_PATH)/../include \
+	$(LOCAL_PATH)/../common \
 	$(call include-path-for, glib) \
 	$(call include-path-for, glib)\glib
 
 
 LOCAL_SHARED_LIBRARIES := \
-	libbluetoothd libbluetooth
+	libbluetooth \
 
 LOCAL_STATIC_LIBRARIES := \
+	libbluez-common-static \
 	libglib_static \
 
 
@@ -247,19 +251,18 @@ ifeq ($(BUILD_HCIEMU),1)
 include $(CLEAR_VARS)
 
 LOCAL_CFLAGS:= \
-	-DVERSION=\"4.69\"
+	-DVERSION=\"4.47\"
 
 LOCAL_SRC_FILES:= \
 	hciemu.c
 
 LOCAL_C_INCLUDES:= \
-	$(LOCAL_PATH)/../lib \
-	$(LOCAL_PATH)/../src \
+	$(LOCAL_PATH)/../include \
+	$(LOCAL_PATH)/../common \
 	$(call include-path-for, glib) \
 	$(call include-path-for, glib)\glib
 
 LOCAL_SHARED_LIBRARIES := \
-	libbluetoothd \
 	libbluetooth \
 	libc \
 	libcutils
@@ -281,17 +284,17 @@ endif #BUILD_HCIEMU
 include $(CLEAR_VARS)
 
 LOCAL_CFLAGS:= \
-	-DVERSION=\"4.69\"
+	-DVERSION=\"4.47\"
 
 LOCAL_SRC_FILES:= \
 	lmptest.c
 
 LOCAL_C_INCLUDES:= \
-	$(LOCAL_PATH)/../lib \
-	$(LOCAL_PATH)/../src
+	$(LOCAL_PATH)/../include \
+	$(LOCAL_PATH)/../common
 
 LOCAL_SHARED_LIBRARIES := \
-	libbluetoothd libbluetooth
+	libbluetooth
 
 LOCAL_MODULE_PATH := $(TARGET_OUT_OPTIONAL_EXECUTABLES)
 LOCAL_MODULE_TAGS := eng
@@ -306,17 +309,17 @@ include $(BUILD_EXECUTABLE)
 include $(CLEAR_VARS)
 
 LOCAL_CFLAGS:= \
-	-DVERSION=\"4.69\"
+	-DVERSION=\"4.47\"
 
 LOCAL_SRC_FILES:= \
 	sdptest.c
 
 LOCAL_C_INCLUDES:= \
-	$(LOCAL_PATH)/../lib \
-	$(LOCAL_PATH)/../src
+	$(LOCAL_PATH)/../include \
+	$(LOCAL_PATH)/../common
 
 LOCAL_SHARED_LIBRARIES := \
-	libbluetoothd libbluetooth
+	libbluetooth
 
 LOCAL_MODULE_PATH := $(TARGET_OUT_OPTIONAL_EXECUTABLES)
 LOCAL_MODULE_TAGS := eng

@@ -1,7 +1,7 @@
 BlueZ D-Bus Agent API description
 **********************************
 
-Copyright (C) 2004-2010  Marcel Holtmann <marcel@holtmann.org>
+Copyright (C) 2004-2008  Marcel Holtmann <marcel@holtmann.org>
 Copyright (C) 2005-2006  Johan Hedberg <johan.hedberg@nokia.com>
 
 
@@ -64,17 +64,6 @@ Methods		void Release()
 
 			To confirm the value it should return an empty reply
 			or an error in case the passkey is invalid.
-
-			Possible errors: org.bluez.Error.Rejected
-			                 org.bluez.Error.Canceled
-
-		void RequestPairingConsent(object device)
-
-			This method gets called when the service daemon
-			needs to confirm an incoming pairing request.
-
-			To accept it should return an empty reply
-			or an error to reject.
 
 			Possible errors: org.bluez.Error.Rejected
 			                 org.bluez.Error.Canceled

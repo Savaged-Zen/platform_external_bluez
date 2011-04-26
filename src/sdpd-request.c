@@ -4,7 +4,7 @@
  *
  *  Copyright (C) 2001-2002  Nokia Corporation
  *  Copyright (C) 2002-2003  Maxim Krasnyansky <maxk@qualcomm.com>
- *  Copyright (C) 2002-2010  Marcel Holtmann <marcel@holtmann.org>
+ *  Copyright (C) 2002-2009  Marcel Holtmann <marcel@holtmann.org>
  *  Copyright (C) 2002-2003  Stephen Crane <steve.crane@rococosoft.com>
  *
  *
@@ -43,7 +43,7 @@
 #include <netinet/in.h>
 
 #include "sdpd.h"
-#include "log.h"
+#include "logging.h"
 
 #define MIN(x, y) ((x) < (y)) ? (x): (y)
 
@@ -98,7 +98,7 @@ struct attrid {
 
 /*
  * Generic data element sequence extractor. Builds
- * a list whose elements are those found in the
+ * a list whose elements are those found in the 
  * sequence. The data type of elements found in the
  * sequence is returned in the reference pDataType
  */
@@ -301,8 +301,8 @@ static int sdp_cstate_get(uint8_t *buffer, size_t len,
  * specified in the "search pattern" must be present in the
  * "target pattern". Here "search pattern" is the set of UUIDs
  * specified by the service discovery client and "target pattern"
- * is the set of UUIDs present in a service record.
- *
+ * is the set of UUIDs present in a service record. 
+ * 
  * Return 1 if each and every UUID in the search
  * pattern exists in the target pattern, 0 if the
  * match succeeds and -1 on error.
@@ -420,7 +420,7 @@ static int service_search_req(sdp_req_t *req, sdp_buf_t *buf)
 			sdp_record_t *rec = (sdp_record_t *) list->data;
 
 			SDPDBG("Checking svcRec : 0x%x", rec->handle);
-
+				
 			if (sdp_match_uuid(pattern, rec->pattern) > 0 &&
 					sdp_check_access(rec->handle, &req->device)) {
 				rsp_count++;
@@ -429,7 +429,7 @@ static int service_search_req(sdp_req_t *req, sdp_buf_t *buf)
 				handleSize += sizeof(uint32_t);
 			}
 		}
-
+		
 		SDPDBG("Match count: %d", rsp_count);
 
 		buf->data_size += handleSize;
@@ -525,8 +525,9 @@ static int service_search_req(sdp_req_t *req, sdp_buf_t *buf)
 		}
 	}
 
-done:
-	free(cstate);
+done:	
+	if (cstate)
+		free(cstate);
 	if (pattern)
 		sdp_list_free(pattern, free);
 
@@ -683,11 +684,11 @@ static int service_attr_req(sdp_req_t *req, sdp_buf_t *buf)
 	SDPDBG("SvcRecHandle : 0x%x", handle);
 	SDPDBG("max_rsp_size : %d", max_rsp_size);
 
-	/*
+	/* 
 	 * Calculate Attribute size acording to MTU
 	 * We can send only (MTU - sizeof(sdp_pdu_hdr_t) - sizeof(sdp_cont_state_t))
 	 */
-	max_rsp_size = MIN(max_rsp_size, req->mtu - sizeof(sdp_pdu_hdr_t) -
+	max_rsp_size = MIN(max_rsp_size, req->mtu - sizeof(sdp_pdu_hdr_t) - 
 			sizeof(uint32_t) - SDP_CONT_STATE_SIZE - sizeof(uint16_t));
 
 	/* pull header for AttributeList byte count */
@@ -744,7 +745,8 @@ static int service_attr_req(sdp_req_t *req, sdp_buf_t *buf)
 	buf->buf_size += sizeof(uint16_t);
 
 done:
-	free(cstate);
+	if (cstate)
+		free(cstate);
 	if (seq)
 		sdp_list_free(seq, free);
 	if (status)
@@ -838,7 +840,7 @@ static int service_search_attr_req(sdp_req_t *req, sdp_buf_t *buf)
 	tmpbuf.buf_size = USHRT_MAX;
 	memset(tmpbuf.data, 0, USHRT_MAX);
 
-	/*
+	/* 
 	 * Calculate Attribute size acording to MTU
 	 * We can send only (MTU - sizeof(sdp_pdu_hdr_t) - sizeof(sdp_cont_state_t))
 	 */
@@ -927,8 +929,10 @@ static int service_search_attr_req(sdp_req_t *req, sdp_buf_t *buf)
 	}
 
 done:
-	free(cstate);
-	free(tmpbuf.data);
+	if (cstate)
+		free(cstate);
+	if (tmpbuf.data)
+		free(tmpbuf.data);
 	if (pattern)
 		sdp_list_free(pattern, free);
 	if (seq)
@@ -1036,33 +1040,20 @@ void handle_request(int sk, uint8_t *data, int len)
 	sdp_req_t req;
 
 	size = sizeof(sa);
-	if (getpeername(sk, (struct sockaddr *) &sa, &size) < 0) {
-		error("getpeername: %s", strerror(errno));
+	if (getpeername(sk, (struct sockaddr *) &sa, &size) < 0)
 		return;
-	}
 
-	if (sa.l2_family == AF_BLUETOOTH) {
+	if (sa.l2_family == AF_BLUETOOTH) { 
 		struct l2cap_options lo;
-
 		memset(&lo, 0, sizeof(lo));
 		size = sizeof(lo);
-
-		if (getsockopt(sk, SOL_L2CAP, L2CAP_OPTIONS, &lo, &size) < 0) {
-			error("getsockopt: %s", strerror(errno));
-			return;
-		}
-
+		getsockopt(sk, SOL_L2CAP, L2CAP_OPTIONS, &lo, &size);
 		bacpy(&req.bdaddr, &sa.l2_bdaddr);
 		req.mtu = lo.omtu;
 		req.local = 0;
 		memset(&sa, 0, sizeof(sa));
 		size = sizeof(sa);
-
-		if (getsockname(sk, (struct sockaddr *) &sa, &size) < 0) {
-			error("getsockname: %s", strerror(errno));
-			return;
-		}
-
+		getsockname(sk, (struct sockaddr *) &sa, &size);
 		bacpy(&req.device, &sa.l2_bdaddr);
 	} else {
 		bacpy(&req.device, BDADDR_ANY);

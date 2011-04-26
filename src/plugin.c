@@ -2,7 +2,7 @@
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
- *  Copyright (C) 2004-2010  Marcel Holtmann <marcel@holtmann.org>
+ *  Copyright (C) 2004-2009  Marcel Holtmann <marcel@holtmann.org>
  *
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -35,7 +35,7 @@
 #include <glib.h>
 
 #include "plugin.h"
-#include "log.h"
+#include "logging.h"
 #include "hcid.h"
 #include "btio.h"
 
@@ -67,7 +67,7 @@ static gboolean add_plugin(void *handle, struct bluetooth_plugin_desc *desc)
 		return FALSE;
 	}
 
-	DBG("Loading %s plugin", desc->name);
+	debug("Loading %s plugin", desc->name);
 
 	plugin = g_try_new0(struct bluetooth_plugin, 1);
 	if (plugin == NULL)
@@ -85,9 +85,6 @@ static gboolean add_plugin(void *handle, struct bluetooth_plugin_desc *desc)
 static gboolean is_disabled(const char *name, char **list)
 {
 	int i;
-
-	if (list == NULL)
-		return FALSE;
 
 	for (i = 0; list[i] != NULL; i++) {
 		char *str;
@@ -119,6 +116,9 @@ gboolean plugin_init(GKeyFile *config)
 	gchar **disabled;
 	unsigned int i;
 
+	if (strlen(PLUGINDIR) == 0)
+		return FALSE;
+
 	/* Make a call to BtIO API so its symbols got resolved before the
 	 * plugins are loaded. */
 	bt_io_error_quark();
@@ -130,26 +130,22 @@ gboolean plugin_init(GKeyFile *config)
 	else
 		disabled = NULL;
 
-	DBG("Loading builtin plugins");
+	debug("Loading builtin plugins");
 
 	for (i = 0; __bluetooth_builtin[i]; i++) {
-		if (is_disabled(__bluetooth_builtin[i]->name, disabled))
+		if (disabled && is_disabled(__bluetooth_builtin[i]->name,
+								disabled))
 			continue;
 
 		add_plugin(NULL,  __bluetooth_builtin[i]);
 	}
 
-	if (strlen(PLUGINDIR) == 0) {
-		g_strfreev(disabled);
-		goto start;
-	}
-
-	DBG("Loading plugins %s", PLUGINDIR);
+	debug("Loading plugins %s", PLUGINDIR);
 
 	dir = g_dir_open(PLUGINDIR, 0, NULL);
 	if (!dir) {
 		g_strfreev(disabled);
-		goto start;
+		return FALSE;
 	}
 
 	while ((file = g_dir_read_name(dir)) != NULL) {
@@ -161,7 +157,7 @@ gboolean plugin_init(GKeyFile *config)
 				g_str_has_suffix(file, ".so") == FALSE)
 			continue;
 
-		if (is_disabled(file, disabled))
+		if (disabled && is_disabled(file, disabled))
 			continue;
 
 		filename = g_build_filename(PLUGINDIR, file, NULL);
@@ -191,14 +187,11 @@ gboolean plugin_init(GKeyFile *config)
 
 	g_strfreev(disabled);
 
-start:
 	for (list = plugins; list; list = list->next) {
 		struct bluetooth_plugin *plugin = list->data;
 
-		if (plugin->desc->init() < 0) {
-			error("Failed to init %s plugin", plugin->desc->name);
+		if (plugin->desc->init() < 0)
 			continue;
-		}
 
 		plugin->active = TRUE;
 	}
@@ -210,7 +203,7 @@ void plugin_cleanup(void)
 {
 	GSList *list;
 
-	DBG("Cleanup plugins");
+	debug("Cleanup plugins");
 
 	for (list = plugins; list; list = list->next) {
 		struct bluetooth_plugin *plugin = list->data;

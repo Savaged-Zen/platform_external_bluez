@@ -4,7 +4,7 @@
  *
  *  Copyright (C) 2001-2002  Nokia Corporation
  *  Copyright (C) 2002-2003  Maxim Krasnyansky <maxk@qualcomm.com>
- *  Copyright (C) 2002-2010  Marcel Holtmann <marcel@holtmann.org>
+ *  Copyright (C) 2002-2009  Marcel Holtmann <marcel@holtmann.org>
  *  Copyright (C) 2002-2003  Stephen Crane <steve.crane@rococosoft.com>
  *
  *
@@ -45,11 +45,12 @@
 #include <dbus/dbus.h>
 
 #include "sdpd.h"
-#include "log.h"
+#include "logging.h"
 #include "manager.h"
-#include "adapter.h"
 
 static sdp_record_t *server = NULL;
+
+static uint8_t service_classes = 0x00;
 
 static uint16_t did_vendor = 0x0000;
 static uint16_t did_product = 0x0000;
@@ -97,9 +98,9 @@ static void update_db_timestamp(void)
 	sdp_attr_replace(server, SDP_ATTR_SVCDB_STATE, d);
 }
 
-static void update_adapter_svclass_list(struct btd_adapter *adapter)
+static void update_svclass_list(const bdaddr_t *src)
 {
-	sdp_list_t *list = adapter_get_services(adapter);
+	sdp_list_t *list = sdp_get_record_list();
 	uint8_t val = 0;
 
 	for (; list; list = list->next) {
@@ -155,30 +156,19 @@ static void update_adapter_svclass_list(struct btd_adapter *adapter)
 
 	SDPDBG("Service classes 0x%02x", val);
 
-	manager_update_svc(adapter, val);
+	service_classes = val;
+
+	manager_update_svc(src, val);
 }
 
-static void update_svclass_list(const bdaddr_t *src)
+uint8_t get_service_classes(const bdaddr_t *bdaddr)
 {
-	GSList *adapters = manager_get_adapters();
-
-	for (; adapters; adapters = adapters->next) {
-		struct btd_adapter *adapter = adapters->data;
-		bdaddr_t bdaddr;
-
-		adapter_get_address(adapter, &bdaddr);
-
-		if (bacmp(src, BDADDR_ANY) == 0 || bacmp(src, &bdaddr) == 0)
-			update_adapter_svclass_list(adapter);
-	}
-
+	return service_classes;
 }
 
-void create_ext_inquiry_response(const char *name,
-					int8_t tx_power, sdp_list_t *services,
-					uint8_t *data)
+void create_ext_inquiry_response(const char *name, uint8_t *data)
 {
-	sdp_list_t *list = services;
+	sdp_list_t *list = sdp_get_record_list();
 	uint8_t *ptr = data;
 	uint16_t uuid[24];
 	int i, index = 0;
@@ -199,16 +189,10 @@ void create_ext_inquiry_response(const char *name,
 		ptr += len + 2;
 	}
 
-	if (tx_power != 0) {
-		*ptr++ = 2;
-		*ptr++ = 0x0a;
-		*ptr++ = (uint8_t) tx_power;
-	}
-
 	if (did_vendor != 0x0000) {
 		uint16_t source = 0x0002;
 		*ptr++ = 9;
-		*ptr++ = 0x10;
+		*ptr++ = 11;
 		*ptr++ = (source & 0x00ff);
 		*ptr++ = (source & 0xff00) >> 8;
 		*ptr++ = (did_vendor & 0x00ff);
@@ -228,9 +212,6 @@ void create_ext_inquiry_response(const char *name,
 			continue;
 
 		if (rec->svclass.value.uuid16 < 0x1100)
-			continue;
-
-		if (rec->svclass.value.uuid16 == PNP_INFO_SVCLASS_ID)
 			continue;
 
 		if (index > 23) {
@@ -415,7 +396,7 @@ int add_record_to_server(const bdaddr_t *src, sdp_record_t *rec)
 			return -1;
 	}
 
-	DBG("Adding record with handle 0x%05x", rec->handle);
+	debug("Adding record with handle 0x%05x", rec->handle);
 
 	sdp_record_add(src, rec);
 
@@ -435,7 +416,7 @@ int add_record_to_server(const bdaddr_t *src, sdp_record_t *rec)
 			continue;
 
 		sdp_uuid2strn((uuid_t *) pattern->data, uuid, sizeof(uuid));
-		DBG("Record pattern UUID %s", uuid);
+		debug("Record pattern UUID %s", uuid);
 	}
 
 	update_db_timestamp();
@@ -448,7 +429,7 @@ int remove_record_from_server(uint32_t handle)
 {
 	sdp_record_t *rec;
 
-	DBG("Removing record with handle 0x%05x", handle);
+	debug("Removing record with handle 0x%05x", handle);
 
 	rec = sdp_record_find(handle);
 	if (!rec)
@@ -621,7 +602,7 @@ success:
 	}
 
 	update_db_timestamp();
-	update_svclass_list(&req->device);
+	update_svclass_list(BDADDR_ANY);
 
 	/* Build a rsp buffer */
 	bt_put_unaligned(htonl(rec->handle), (uint32_t *) rsp->data);

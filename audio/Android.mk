@@ -21,14 +21,15 @@ LOCAL_SRC_FILES:= \
 	unix.c
 
 LOCAL_CFLAGS:= \
-	-DVERSION=\"4.69\" \
+	-DVERSION=\"4.47\" \
 	-DSTORAGEDIR=\"/data/misc/bluetoothd\" \
-	-DCONFIGDIR=\"/etc/bluetooth\" \
+	-DCONFIGDIR=\"/etc/bluez\" \
 	-DANDROID \
 	-D__S_IFREG=0100000  # missing from bionic stat.h
 
 LOCAL_C_INCLUDES:= \
-	$(LOCAL_PATH)/../lib \
+	$(LOCAL_PATH)/../include \
+	$(LOCAL_PATH)/../common \
 	$(LOCAL_PATH)/../gdbus \
 	$(LOCAL_PATH)/../src \
 	$(call include-path-for, glib) \
@@ -64,8 +65,6 @@ LOCAL_CFLAGS:= -funroll-loops
 
 LOCAL_C_INCLUDES:= \
 	$(LOCAL_PATH)/../sbc \
-    ../../../../frameworks/base/include \
-	system/bluetooth/bluez-clean-headers
 
 LOCAL_SHARED_LIBRARIES := \
 	libcutils

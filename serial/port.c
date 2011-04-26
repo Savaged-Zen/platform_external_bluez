@@ -2,7 +2,7 @@
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
- *  Copyright (C) 2004-2010  Marcel Holtmann <marcel@holtmann.org>
+ *  Copyright (C) 2004-2009  Marcel Holtmann <marcel@holtmann.org>
  *
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -47,7 +47,7 @@
 
 #include "../src/dbus-common.h"
 
-#include "log.h"
+#include "logging.h"
 #include "glib-helper.h"
 #include "btio.h"
 
@@ -155,7 +155,7 @@ static int port_release(struct serial_port *port)
 		return 0;
 	}
 
-	DBG("Serial port %s released", port->dev);
+	debug("Serial port %s released", port->dev);
 
 	rfcomm_ctl = socket(AF_BLUETOOTH, SOCK_RAW, BTPROTO_RFCOMM);
 	if (rfcomm_ctl < 0)
@@ -223,7 +223,7 @@ static void path_unregister(void *data)
 {
 	struct serial_device *device = data;
 
-	DBG("Unregistered interface %s on path %s", SERIAL_PORT_INTERFACE,
+	debug("Unregistered interface %s on path %s", SERIAL_PORT_INTERFACE,
 		device->path);
 
 	devices = g_slist_remove(devices, device);
@@ -358,7 +358,7 @@ static void rfcomm_connect_cb(GIOChannel *chan, GError *conn_err,
 
 	port->dev = g_strdup_printf("/dev/rfcomm%d", port->id);
 
-	DBG("Serial port %s created", port->dev);
+	debug("Serial port %s created", port->dev);
 
 	g_io_channel_shutdown(chan, TRUE, NULL);
 
@@ -592,7 +592,7 @@ static struct serial_device *create_serial_device(DBusConnection *conn,
 		return NULL;
 	}
 
-	DBG("Registered interface %s on path %s",
+	debug("Registered interface %s on path %s",
 		SERIAL_PORT_INTERFACE, path);
 
 	return device;

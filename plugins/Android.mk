@@ -10,11 +10,12 @@ LOCAL_SRC_FILES:= \
 	hciops.c \
 
 LOCAL_CFLAGS:= \
-	-DVERSION=\"4.69\" \
+	-DVERSION=\"4.47\" \
 	-DBLUETOOTH_PLUGIN_BUILTIN \
 
 LOCAL_C_INCLUDES:= \
-	$(LOCAL_PATH)/../lib \
+	$(LOCAL_PATH)/../include \
+        $(LOCAL_PATH)/../common \
         $(LOCAL_PATH)/../gdbus \
         $(LOCAL_PATH)/../src \
         $(call include-path-for, glib) \
@@ -27,6 +28,7 @@ LOCAL_SHARED_LIBRARIES := \
 	libdbus
 
 LOCAL_STATIC_LIBRARIES := \
+	libbluez-common-static \
 	libglib_static
 
 LOCAL_MODULE_PATH := $(TARGET_OUT_SHARED_LIBRARIES)/bluez-plugin

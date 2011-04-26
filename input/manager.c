@@ -2,7 +2,7 @@
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
- *  Copyright (C) 2004-2010  Marcel Holtmann <marcel@holtmann.org>
+ *  Copyright (C) 2004-2009  Marcel Holtmann <marcel@holtmann.org>
  *
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -34,7 +34,7 @@
 
 #include <gdbus.h>
 
-#include "log.h"
+#include "logging.h"
 #include "../src/adapter.h"
 #include "../src/device.h"
 
@@ -45,7 +45,7 @@
 static int idle_timeout = 0;
 
 static DBusConnection *connection = NULL;
-static GSList *adapters = NULL;
+GSList *adapters = NULL;
 
 static void input_remove(struct btd_device *device, const char *uuid)
 {
@@ -179,7 +179,7 @@ int input_manager_init(DBusConnection *conn, GKeyFile *config)
 		idle_timeout = g_key_file_get_integer(config, "General",
 						"IdleTimeout", &err);
 		if (err) {
-			DBG("input.conf: %s", err->message);
+			debug("input.conf: %s", err->message);
 			g_error_free(err);
 		}
 	}

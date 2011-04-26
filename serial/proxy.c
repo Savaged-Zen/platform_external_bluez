@@ -2,7 +2,7 @@
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
- *  Copyright (C) 2004-2010  Marcel Holtmann <marcel@holtmann.org>
+ *  Copyright (C) 2004-2009  Marcel Holtmann <marcel@holtmann.org>
  *
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -54,7 +54,7 @@
 #include "../src/dbus-common.h"
 #include "../src/adapter.h"
 
-#include "log.h"
+#include "logging.h"
 #include "textfile.h"
 
 #include "error.h"
@@ -62,6 +62,12 @@
 #include "glib-helper.h"
 #include "btio.h"
 #include "proxy.h"
+
+#define SERIAL_PORT_NAME	"spp"
+#define SERIAL_PORT_UUID	"00001101-0000-1000-8000-00805F9B34FB"
+
+#define DIALUP_NET_NAME		"dun"
+#define DIALUP_NET_UUID		"00001103-0000-1000-8000-00805F9B34FB"
 
 #define SERIAL_PROXY_INTERFACE	"org.bluez.SerialProxy"
 #define SERIAL_MANAGER_INTERFACE "org.bluez.SerialProxyManager"
@@ -487,7 +493,7 @@ static void confirm_event_cb(GIOChannel *chan, gpointer user_data)
 		goto drop;
 	}
 
-	DBG("Serial Proxy: incoming connect from %s", address);
+	debug("Serial Proxy: incoming connect from %s", address);
 
 	prx->rfcomm = g_io_channel_ref(chan);
 
@@ -533,7 +539,7 @@ static int enable_proxy(struct serial_proxy *prx)
 		goto failed;
 	}
 
-	DBG("Allocated channel %d", prx->channel);
+	debug("Allocated channel %d", prx->channel);
 
 	g_io_channel_set_close_on_unref(prx->io, TRUE);
 
@@ -788,7 +794,7 @@ static void proxy_path_unregister(gpointer data)
 	struct serial_proxy *prx = data;
 	int sk;
 
-	DBG("Unregistered proxy: %s", prx->address);
+	debug("Unregistered proxy: %s", prx->address);
 
 	if (prx->type != TTY_PROXY)
 		goto done;
@@ -823,7 +829,7 @@ static int register_proxy_object(struct serial_proxy *prx)
 	prx->path = g_strdup(path);
 	adapter->proxies = g_slist_append(adapter->proxies, prx);
 
-	DBG("Registered proxy: %s", path);
+	debug("Registered proxy: %s", path);
 
 	return 0;
 }
@@ -1219,21 +1225,19 @@ static void serial_proxy_init(struct serial_adapter *adapter)
 		uuid_str = g_key_file_get_string(config, group_str, "UUID",
 									&gerr);
 		if (gerr) {
-			DBG("%s: %s", file, gerr->message);
+			debug("%s: %s", file, gerr->message);
 			g_error_free(gerr);
 			g_key_file_free(config);
-			g_strfreev(group_list);
 			return;
 		}
 
 		address = g_key_file_get_string(config, group_str, "Address",
 									&gerr);
 		if (gerr) {
-			DBG("%s: %s", file, gerr->message);
+			debug("%s: %s", file, gerr->message);
 			g_error_free(gerr);
 			g_key_file_free(config);
 			g_free(uuid_str);
-			g_strfreev(group_list);
 			return;
 		}
 
@@ -1241,7 +1245,7 @@ static void serial_proxy_init(struct serial_adapter *adapter)
 		if (err == -EINVAL)
 			error("Invalid address.");
 		else if (err == -EALREADY)
-			DBG("Proxy already exists.");
+			debug("Proxy already exists.");
 		else if (err < 0)
 			error("Proxy creation failed (%s)", strerror(-err));
 		else {
@@ -1285,7 +1289,7 @@ int proxy_register(DBusConnection *conn, struct btd_adapter *btd_adapter)
 
 	adapters = g_slist_append(adapters, adapter);
 
-	DBG("Registered interface %s on path %s",
+	debug("Registered interface %s on path %s",
 		SERIAL_MANAGER_INTERFACE, path);
 
 	serial_proxy_init(adapter);

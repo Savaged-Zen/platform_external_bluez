@@ -4,7 +4,7 @@
  *
  *  Copyright (C) 2001-2002  Nokia Corporation
  *  Copyright (C) 2002-2003  Maxim Krasnyansky <maxk@qualcomm.com>
- *  Copyright (C) 2002-2010  Marcel Holtmann <marcel@holtmann.org>
+ *  Copyright (C) 2002-2009  Marcel Holtmann <marcel@holtmann.org>
  *  Copyright (C) 2002-2003  Stephen Crane <steve.crane@rococosoft.com>
  *
  *
@@ -46,7 +46,7 @@
 
 #include <glib.h>
 
-#include "log.h"
+#include "logging.h"
 #include "sdpd.h"
 
 static GIOChannel *l2cap_io = NULL, *unix_io = NULL;
@@ -114,10 +114,7 @@ static int init_server(uint16_t mtu, int master, int compat)
 		}
 	}
 
-	if (listen(l2cap_sock, 5) < 0) {
-		error("listen: %s", strerror(errno));
-		return -1;
-	}
+	listen(l2cap_sock, 5);
 
 	if (!compat) {
 		unix_sock = -1;
@@ -159,6 +156,7 @@ static int init_server(uint16_t mtu, int master, int compat)
 
         info("Got Unix socket fd '%d' from environment", unix_sock);
 #endif
+
         return 0;
 }
 

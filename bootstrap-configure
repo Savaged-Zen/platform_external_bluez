@@ -17,8 +17,6 @@ fi
 		--localstatedir=/var \
 		--libexecdir=/lib \
 		--enable-netlink \
-		--enable-capng \
-		--enable-tracer \
 		--enable-tools \
 		--enable-bccmd \
 		--enable-dfutool \
@@ -29,5 +27,6 @@ fi
 		--enable-test \
 		--enable-cups \
 		--disable-pcmcia \
+		--disable-manpages \
 		--disable-udevrules \
 		--disable-configfiles $*

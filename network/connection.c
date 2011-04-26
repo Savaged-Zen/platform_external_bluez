@@ -2,7 +2,7 @@
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
- *  Copyright (C) 2004-2010  Marcel Holtmann <marcel@holtmann.org>
+ *  Copyright (C) 2004-2009  Marcel Holtmann <marcel@holtmann.org>
  *
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -38,7 +38,7 @@
 #include <glib.h>
 #include <gdbus.h>
 
-#include "log.h"
+#include "logging.h"
 #include "glib-helper.h"
 #include "btio.h"
 #include "dbus-common.h"
@@ -82,6 +82,7 @@ struct __service_16 {
 } __attribute__ ((packed));
 
 static DBusConnection *connection = NULL;
+static const char *prefix = NULL;
 static GSList *peers = NULL;
 
 static struct network_peer *find_peer(GSList *list, const char *path)
@@ -156,7 +157,7 @@ static gboolean bnep_watchdog_cb(GIOChannel *chan, GIOCondition cond,
 					NETWORK_PEER_INTERFACE, "Connected",
 					DBUS_TYPE_BOOLEAN, &connected);
 		emit_property_changed(connection, nc->peer->path,
-					NETWORK_PEER_INTERFACE, "Interface",
+					NETWORK_PEER_INTERFACE, "Device",
 					DBUS_TYPE_STRING, &property);
 		emit_property_changed(connection, nc->peer->path,
 					NETWORK_PEER_INTERFACE, "UUID",
@@ -173,8 +174,8 @@ static gboolean bnep_watchdog_cb(GIOChannel *chan, GIOCondition cond,
 
 	bnep_if_down(nc->dev);
 	nc->state = DISCONNECTED;
-	memset(nc->dev, 0, sizeof(nc->dev));
-	strcpy(nc->dev, "bnep%d");
+	memset(nc->dev, 0, 16);
+	strncpy(nc->dev, prefix, sizeof(nc->dev) - 1);
 
 	return FALSE;
 }
@@ -288,7 +289,7 @@ static gboolean bnep_setup_cb(GIOChannel *chan, GIOCondition cond,
 		goto failed;
 	}
 
-	bnep_if_up(nc->dev);
+	bnep_if_up(nc->dev, nc->id);
 	pdev = nc->dev;
 	uuid = bnep_uuid(nc->id);
 
@@ -301,7 +302,7 @@ static gboolean bnep_setup_cb(GIOChannel *chan, GIOCondition cond,
 				NETWORK_PEER_INTERFACE, "Connected",
 				DBUS_TYPE_BOOLEAN, &connected);
 	emit_property_changed(connection, nc->peer->path,
-				NETWORK_PEER_INTERFACE, "Interface",
+				NETWORK_PEER_INTERFACE, "Device",
 				DBUS_TYPE_STRING, &pdev);
 	emit_property_changed(connection, nc->peer->path,
 				NETWORK_PEER_INTERFACE, "UUID",
@@ -501,9 +502,9 @@ static DBusMessage *connection_get_properties(DBusConnection *conn,
 	connected = nc ? TRUE : FALSE;
 	dict_append_entry(&dict, "Connected", DBUS_TYPE_BOOLEAN, &connected);
 
-	/* Interface */
+	/* Device */
 	property = nc ? nc->dev : "";
-	dict_append_entry(&dict, "Interface", DBUS_TYPE_STRING, &property);
+	dict_append_entry(&dict, "Device", DBUS_TYPE_STRING, &property);
 
 	/* UUID */
 	property = nc ? bnep_uuid(nc->id) : "";
@@ -538,7 +539,7 @@ static void path_unregister(void *data)
 {
 	struct network_peer *peer = data;
 
-	DBG("Unregistered interface %s on path %s",
+	debug("Unregistered interface %s on path %s",
 		NETWORK_PEER_INTERFACE, peer->path);
 
 	peers = g_slist_remove(peers, peer);
@@ -602,7 +603,7 @@ static struct network_peer *create_peer(struct btd_device *device,
 		return NULL;
 	}
 
-	DBG("Registered interface %s on path %s",
+	debug("Registered interface %s on path %s",
 		NETWORK_PEER_INTERFACE, path);
 
 	return peer;
@@ -631,8 +632,8 @@ int connection_register(struct btd_device *device, const char *path,
 
 	nc = g_new0(struct network_conn, 1);
 	nc->id = id;
-	memset(nc->dev, 0, sizeof(nc->dev));
-	strcpy(nc->dev, "bnep%d");
+	memset(nc->dev, 0, 16);
+	strncpy(nc->dev, prefix, sizeof(nc->dev) - 1);
 	nc->state = DISCONNECTED;
 	nc->peer = peer;
 
@@ -641,15 +642,17 @@ int connection_register(struct btd_device *device, const char *path,
 	return 0;
 }
 
-int connection_init(DBusConnection *conn)
+int connection_init(DBusConnection *conn, const char *iface_prefix)
 {
 	connection = dbus_connection_ref(conn);
+	prefix = iface_prefix;
 
 	return 0;
 }
 
-void connection_exit(void)
+void connection_exit()
 {
 	dbus_connection_unref(connection);
 	connection = NULL;
+	prefix = NULL;
 }

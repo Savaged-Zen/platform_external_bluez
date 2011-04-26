@@ -2,8 +2,8 @@
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
- *  Copyright (C) 2006-2010  Nokia Corporation
- *  Copyright (C) 2004-2010  Marcel Holtmann <marcel@holtmann.org>
+ *  Copyright (C) 2006-2007  Nokia Corporation
+ *  Copyright (C) 2004-2009  Marcel Holtmann <marcel@holtmann.org>
  *
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -67,8 +67,6 @@ struct audio_device {
 	struct control *control;
 	struct target *target;
 
-	guint hs_preauth_id;
-
 	struct dev_priv *priv;
 };
 
@@ -79,16 +77,11 @@ struct audio_device *audio_device_register(DBusConnection *conn,
 
 void audio_device_unregister(struct audio_device *device);
 
-gboolean audio_device_is_active(struct audio_device *dev,
+gboolean audio_device_is_connected(struct audio_device *dev,
 						const char *interface);
 
 typedef void (*authorization_cb) (DBusError *derr, void *user_data);
 
-int audio_device_cancel_authorization(struct audio_device *dev,
-					authorization_cb cb, void *user_data);
-
 int audio_device_request_authorization(struct audio_device *dev,
 					const char *uuid, authorization_cb cb,
 					void *user_data);
-
-void audio_device_set_authorized(struct audio_device *dev, gboolean auth);

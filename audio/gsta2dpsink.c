@@ -2,7 +2,7 @@
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
- *  Copyright (C) 2004-2010  Marcel Holtmann <marcel@holtmann.org>
+ *  Copyright (C) 2004-2009  Marcel Holtmann <marcel@holtmann.org>
  *
  *
  *  This library is free software; you can redistribute it and/or
@@ -28,7 +28,6 @@
 #include <unistd.h>
 #include <pthread.h>
 
-#include "gstpragma.h"
 #include "gsta2dpsink.h"
 
 GType gst_avdtp_sink_get_type(void);
@@ -144,7 +143,8 @@ remove_element_and_fail:
 	return NULL;
 
 cleanup_and_fail:
-	g_object_unref(G_OBJECT(element));
+	if (element != NULL)
+		g_object_unref(G_OBJECT(element));
 
 	return NULL;
 }
