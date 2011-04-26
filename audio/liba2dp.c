@@ -39,6 +39,9 @@
 #include <sys/poll.h>
 #include <sys/prctl.h>
 
+#include <bluetooth/bluetooth.h>
+#include <bluetooth/l2cap.h>
+
 #include "ipc.h"
 #include "sbc.h"
 #include "rtp.h"
@@ -85,8 +88,15 @@
 /* timeout in milliseconds to prevent poll() from hanging indefinitely */
 #define POLL_TIMEOUT			1000
 
+/* milliseconds of unsucessfull a2dp packets before we stop trying to catch up
+ * on write()'s and fall-back to metered writes */
+#define CATCH_UP_TIMEOUT		200
+
 /* timeout in milliseconds for a2dp_write */
-#define WRITE_TIMEOUT			500
+#define WRITE_TIMEOUT			1000
+
+/* timeout in seconds for command socket recv() */
+#define RECV_TIMEOUT			5
 
 
 typedef enum {
@@ -109,13 +119,15 @@ typedef enum {
 } a2dp_command_t;
 
 struct bluetooth_data {
-	int link_mtu;					/* MTU for transport channel */
+	unsigned int link_mtu;			/* MTU for transport channel */
 	struct pollfd stream;			/* Audio stream filedescriptor */
 	struct pollfd server;			/* Audio daemon filedescriptor */
 	a2dp_state_t state;				/* Current A2DP state */
 	a2dp_command_t command;			/* Current command for a2dp_thread */
 	pthread_t thread;
 	pthread_mutex_t mutex;
+	int started;
+	pthread_cond_t thread_start;
 	pthread_cond_t thread_wait;
 	pthread_cond_t client_wait;
 
@@ -141,9 +153,9 @@ struct bluetooth_data {
 
 static uint64_t get_microseconds()
 {
-	struct timeval now;
-	gettimeofday(&now, NULL);
-	return (now.tv_sec * 1000000UL + now.tv_usec);
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (now.tv_sec * 1000000UL + now.tv_nsec / 1000UL);
 }
 
 #ifdef ENABLE_TIMING
@@ -174,6 +186,31 @@ static void bluetooth_close(struct bluetooth_data *data)
 	}
 
 	data->state = A2DP_STATE_NONE;
+}
+
+static int l2cap_set_flushable(int fd, int flushable)
+{
+	int flags;
+	socklen_t len;
+
+	len = sizeof(flags);
+	if (getsockopt(fd, SOL_L2CAP, L2CAP_LM, &flags, &len) < 0)
+		return -errno;
+
+	if (flushable) {
+		if (flags & L2CAP_LM_FLUSHABLE)
+			return 0;
+		flags |= L2CAP_LM_FLUSHABLE;
+	} else {
+		if (!(flags & L2CAP_LM_FLUSHABLE))
+			return 0;
+		flags &= ~L2CAP_LM_FLUSHABLE;
+	}
+
+	if (setsockopt(fd, SOL_L2CAP, L2CAP_LM, &flags, sizeof(flags)) < 0)
+		return -errno;
+
+	return 0;
 }
 
 static int bluetooth_start(struct bluetooth_data *data)
@@ -214,6 +251,7 @@ static int bluetooth_start(struct bluetooth_data *data)
 		err = -errno;
 		goto error;
 	}
+	l2cap_set_flushable(data->stream.fd, 1);
 	data->stream.events = POLLOUT;
 
 	/* set our socket buffer to the size of PACKET_BUFFER_COUNT packets */
@@ -233,9 +271,9 @@ static int bluetooth_start(struct bluetooth_data *data)
 	return 0;
 
 error:
-	/* set state to A2DP_STATE_INITIALIZED to force reconfiguration */
+	/* close bluetooth connection to force reinit and reconfiguration */
 	if (data->state == A2DP_STATE_STARTING)
-		set_state(data, A2DP_STATE_INITIALIZED);
+		bluetooth_close(data);
 	return err;
 }
 
@@ -249,6 +287,7 @@ static int bluetooth_stop(struct bluetooth_data *data)
 	DBG("bluetooth_stop");
 
 	data->state = A2DP_STATE_STOPPING;
+	l2cap_set_flushable(data->stream.fd, 0);
 	if (data->stream.fd >= 0) {
 		close(data->stream.fd);
 		data->stream.fd = -1;
@@ -644,12 +683,11 @@ static int avdtp_write(struct bluetooth_data *data)
 		} else {
 			data->next_write = now;
 		}
-		if (ahead < 0) {
+		if (ahead <= -CATCH_UP_TIMEOUT * 1000) {
 			/* fallen too far behind, don't try to catch up */
-			VDBG("ahead < 0, resetting next_write");
+			VDBG("ahead < %d, reseting next_write timestamp", -CATCH_UP_TIMEOUT * 1000);
 			data->next_write = 0;
 		} else {
-			/* advance next_write by duration */
 			data->next_write += duration;
 		}
 
@@ -672,6 +710,7 @@ static int avdtp_write(struct bluetooth_data *data)
 		/* can happen during normal remote disconnect */
 		VDBG("poll() failed: %d (revents = %d, errno %s)",
 				ret, data->stream.revents, strerror(errno));
+		data->next_write = 0;
 	}
 
 	/* Reset buffer of data to send */
@@ -695,7 +734,7 @@ static int audioservice_send(struct bluetooth_data *data,
 
 	length = msg->length ? msg->length : BT_SUGGESTED_BUFFER_SIZE;
 
-	VDBG("sending %s", bt_audio_strmsg(msg->msg_type));
+	VDBG("sending %s", bt_audio_strtype(msg->type));
 	if (send(data->server.fd, msg, length,
 			MSG_NOSIGNAL) > 0)
 		err = 0;
@@ -784,13 +823,20 @@ static int audioservice_expect(struct bluetooth_data *data,
 static int bluetooth_init(struct bluetooth_data *data)
 {
 	int sk, err;
+	struct timeval tv = {.tv_sec = RECV_TIMEOUT};
 
 	DBG("bluetooth_init");
 
 	sk = bt_audio_service_open();
-	if (sk <= 0) {
+	if (sk < 0) {
 		ERR("bt_audio_service_open failed\n");
 		return -errno;
+	}
+
+	err = setsockopt(sk, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+	if (err < 0) {
+		ERR("bluetooth_init setsockopt(SO_RCVTIMEO) failed %d", err);
+		return err;
 	}
 
 	data->server.fd = sk;
@@ -807,15 +853,19 @@ static int bluetooth_parse_capabilities(struct bluetooth_data *data,
 	codec_capabilities_t *codec = (void *) rsp->data;
 
 	if (codec->transport != BT_CAPABILITIES_TRANSPORT_A2DP)
-		return 0;
+		return -EINVAL;
 
 	while (bytes_left > 0) {
 		if ((codec->type == BT_A2DP_SBC_SINK) &&
-				!(codec->lock & BT_WRITE_LOCK))
+			!(codec->lock & BT_WRITE_LOCK))
 			break;
 
+		if (codec->length == 0) {
+			ERR("bluetooth_parse_capabilities() invalid codec capabilities length");
+			return -EINVAL;
+		}
 		bytes_left -= codec->length;
-		codec = (void *) codec + codec->length;
+		codec = (codec_capabilities_t *)((char *)codec + codec->length);
 	}
 
 	if (bytes_left <= 0 ||
@@ -860,36 +910,47 @@ static int bluetooth_configure(struct bluetooth_data *data)
 		goto error;
 	}
 
-	bluetooth_parse_capabilities(data, getcaps_rsp);
+	err = bluetooth_parse_capabilities(data, getcaps_rsp);
+	if (err < 0) {
+		ERR("bluetooth_parse_capabilities failed err: %d", err);
+		goto error;
+	}
+
 	err = bluetooth_a2dp_hw_params(data);
 	if (err < 0) {
 		ERR("bluetooth_a2dp_hw_params failed err: %d", err);
 		goto error;
 	}
 
+
 	set_state(data, A2DP_STATE_CONFIGURED);
 	return 0;
 
 error:
+
 	if (data->state == A2DP_STATE_CONFIGURING)
-		set_state(data, A2DP_STATE_INITIALIZED);
+		bluetooth_close(data);
 	return err;
 }
 
 static void set_state(struct bluetooth_data *data, a2dp_state_t state)
 {
-	pthread_mutex_lock(&data->mutex);
 	data->state = state;
 	pthread_cond_signal(&data->client_wait);
-	pthread_mutex_unlock(&data->mutex);
+}
+
+static void __set_command(struct bluetooth_data *data, a2dp_command_t command)
+{
+	VDBG("set_command %d\n", command);
+	data->command = command;
+	pthread_cond_signal(&data->thread_wait);
+	return;
 }
 
 static void set_command(struct bluetooth_data *data, a2dp_command_t command)
 {
-	VDBG("set_command %d\n", command);
 	pthread_mutex_lock(&data->mutex);
-	data->command = command;
-	pthread_cond_signal(&data->thread_wait);
+	__set_command(data, command);
 	pthread_mutex_unlock(&data->mutex);
 }
 
@@ -910,20 +971,39 @@ static int wait_for_start(struct bluetooth_data *data, int timeout)
 	ts.tv_sec = tv.tv_sec + (timeout / 1000);
 	ts.tv_nsec = (tv.tv_usec + (timeout % 1000) * 1000L ) * 1000L;
 
-	while (state != A2DP_STATE_STARTED && !err) {
+	pthread_mutex_lock(&data->mutex);
+	while (state != A2DP_STATE_STARTED) {
 		if (state == A2DP_STATE_NONE)
-			set_command(data, A2DP_CMD_INIT);
+			__set_command(data, A2DP_CMD_INIT);
 		else if (state == A2DP_STATE_INITIALIZED)
-			set_command(data, A2DP_CMD_CONFIGURE);
-		else if (state == A2DP_STATE_CONFIGURED)
-			set_command(data, A2DP_CMD_START);
+			__set_command(data, A2DP_CMD_CONFIGURE);
+		else if (state == A2DP_STATE_CONFIGURED) {
+			__set_command(data, A2DP_CMD_START);
+		}
+again:
+		err = pthread_cond_timedwait(&data->client_wait, &data->mutex, &ts);
+		if (err) {
+			/* don't timeout if we're done */
+			if (data->state == A2DP_STATE_STARTED) {
+				err = 0;
+				break;
+			}
+			if (err == ETIMEDOUT)
+				break;
+			goto again;
+		}
 
-		pthread_mutex_lock(&data->mutex);
-		while ((err = pthread_cond_timedwait(&data->client_wait, &data->mutex, &ts))
-				== EINTR) ;
+		if (state == data->state)
+			goto again;
+
 		state = data->state;
-		pthread_mutex_unlock(&data->mutex);
+
+		if (state == A2DP_STATE_NONE) {
+			err = ENODEV;
+			break;
+		}
 	}
+	pthread_mutex_unlock(&data->mutex);
 
 #ifdef ENABLE_TIMING
 	end = get_microseconds();
@@ -934,58 +1014,87 @@ static int wait_for_start(struct bluetooth_data *data, int timeout)
 	return -err;
 }
 
+static void a2dp_free(struct bluetooth_data *data)
+{
+	pthread_cond_destroy(&data->client_wait);
+	pthread_cond_destroy(&data->thread_wait);
+	pthread_cond_destroy(&data->thread_start);
+	pthread_mutex_destroy(&data->mutex);
+	free(data);
+	return;
+}
+
 static void* a2dp_thread(void *d)
 {
 	struct bluetooth_data* data = (struct bluetooth_data*)d;
+	a2dp_command_t command = A2DP_CMD_NONE;
+	int err = 0;
 
 	DBG("a2dp_thread started");
-	prctl(PR_SET_NAME, "a2dp_thread", 0, 0, 0);
+	prctl(PR_SET_NAME, (int)"a2dp_thread", 0, 0, 0);
+
+	pthread_mutex_lock(&data->mutex);
+
+	data->started = 1;
+	pthread_cond_signal(&data->thread_start);
 
 	while (1)
 	{
-		a2dp_command_t command;
+		while (1) {
+			pthread_cond_wait(&data->thread_wait, &data->mutex);
 
-		pthread_mutex_lock(&data->mutex);
-		pthread_cond_wait(&data->thread_wait, &data->mutex);
-		command = data->command;
-		pthread_mutex_unlock(&data->mutex);
+			/* Initialization needed */
+			if (data->state == A2DP_STATE_NONE &&
+				data->command != A2DP_CMD_QUIT) {
+				err = bluetooth_init(data);
+			}
+
+			/* New state command signaled */
+			if (command != data->command) {
+				command = data->command;
+				break;
+			}
+		}
 
 		switch (command) {
-			case A2DP_CMD_INIT:
-				if (data->state != A2DP_STATE_NONE)
-					break;
-				bluetooth_init(data);
-				break;
 			case A2DP_CMD_CONFIGURE:
 				if (data->state != A2DP_STATE_INITIALIZED)
 					break;
-				bluetooth_configure(data);
+				err = bluetooth_configure(data);
 				break;
 
 			case A2DP_CMD_START:
 				if (data->state != A2DP_STATE_CONFIGURED)
 					break;
-				bluetooth_start(data);
+				err = bluetooth_start(data);
 				break;
 
 			case A2DP_CMD_STOP:
 				if (data->state != A2DP_STATE_STARTED)
 					break;
-				bluetooth_stop(data);
+				err = bluetooth_stop(data);
 				break;
 
 			case A2DP_CMD_QUIT:
 				bluetooth_close(data);
 				sbc_finish(&data->sbc);
-				free(data);
+				a2dp_free(data);
 				goto done;
 
+			case A2DP_CMD_INIT:
+				/* already called bluetooth_init() */
 			default:
 				break;
+		}
+		// reset last command in case of error to allow
+		// re-execution of the same command
+		if (err < 0) {
+			command = A2DP_CMD_NONE;
 		}
 	}
 
 done:
+	pthread_mutex_unlock(&data->mutex);
 	DBG("a2dp_thread finished");
 	return NULL;
 }
@@ -1006,6 +1115,7 @@ int a2dp_init(int rate, int channels, a2dpData* dataPtr)
 	data->server.fd = -1;
 	data->stream.fd = -1;
 	data->state = A2DP_STATE_NONE;
+	data->command = A2DP_CMD_NONE;
 
 	strncpy(data->address, "00:00:00:00:00:00", 18);
 	data->rate = rate;
@@ -1014,18 +1124,42 @@ int a2dp_init(int rate, int channels, a2dpData* dataPtr)
 	sbc_init(&data->sbc, 0);
 
 	pthread_mutex_init(&data->mutex, NULL);
+	pthread_cond_init(&data->thread_start, NULL);
 	pthread_cond_init(&data->thread_wait, NULL);
 	pthread_cond_init(&data->client_wait, NULL);
 
+	pthread_mutex_lock(&data->mutex);
+	data->started = 0;
+
 	pthread_attr_init(&attr);
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	pthread_create(&data->thread, &attr, a2dp_thread, data);
+
+	err = pthread_create(&data->thread, &attr, a2dp_thread, data);
+	if (err) {
+		/* If the thread create fails we must not wait */
+		pthread_mutex_unlock(&data->mutex);
+		err = -err;
+		goto error;
+	}
+
+	/* Make sure the state machine is ready and waiting */
+	while (!data->started) {
+		pthread_cond_wait(&data->thread_start, &data->mutex);
+	}
+
+	/* Poke the state machine to get it going */
+	pthread_cond_signal(&data->thread_wait);
+
+	pthread_mutex_unlock(&data->mutex);
+	pthread_attr_destroy(&attr);
 
 	*dataPtr = data;
 	return 0;
 error:
 	bluetooth_close(data);
-	free(data);
+	sbc_finish(&data->sbc);
+	pthread_attr_destroy(&attr);
+	a2dp_free(data);
 
 	return err;
 }
@@ -1046,7 +1180,8 @@ int a2dp_write(a2dpData d, const void* buffer, int count)
 	int codesize;
 	int err, ret = 0;
 	long frames_left = count;
-	int encoded, written;
+	int encoded;
+	unsigned int written;
 	const char *buff;
 	int did_configure = 0;
 #ifdef ENABLE_TIMING
@@ -1081,7 +1216,8 @@ int a2dp_write(a2dpData d, const void* buffer, int count)
 		data->nsamples += encoded;
 
 		/* No space left for another frame then send */
-		if (data->count + written >= data->link_mtu) {
+		if ((data->count + written >= data->link_mtu) ||
+				(data->count + written >= BUFFER_SIZE)) {
 			VDBG("sending packet %d, count %d, link_mtu %u",
 					data->seq_num, data->count,
 					data->link_mtu);

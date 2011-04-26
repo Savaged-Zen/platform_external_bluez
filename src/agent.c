@@ -2,8 +2,8 @@
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
- *  Copyright (C) 2006-2008  Nokia Corporation
- *  Copyright (C) 2004-2009  Marcel Holtmann <marcel@holtmann.org>
+ *  Copyright (C) 2006-2010  Nokia Corporation
+ *  Copyright (C) 2004-2010  Marcel Holtmann <marcel@holtmann.org>
  *
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -41,7 +41,7 @@
 #include <dbus/dbus.h>
 #include <gdbus.h>
 
-#include "logging.h"
+#include "log.h"
 
 #include "hcid.h"
 #include "adapter.h"
@@ -55,7 +55,10 @@ typedef enum {
 	AGENT_REQUEST_CONFIRMATION,
 	AGENT_REQUEST_PINCODE,
 	AGENT_REQUEST_AUTHORIZE,
-	AGENT_REQUEST_CONFIRM_MODE
+	AGENT_REQUEST_CONFIRM_MODE,
+	AGENT_REQUEST_OOB_AVAILABILITY,
+	AGENT_REQUEST_OOB_DATA,
+	AGENT_REQUEST_PAIRING_CONSENT,
 } agent_request_type_t;
 
 struct agent {
@@ -63,6 +66,7 @@ struct agent {
 	char *name;
 	char *path;
 	uint8_t capability;
+	gboolean oob;
 	struct agent_request *request;
 	int exited;
 	agent_remove_cb remove_cb;
@@ -89,7 +93,7 @@ static void agent_release(struct agent *agent)
 {
 	DBusMessage *message;
 
-	debug("Releasing agent %s, %s", agent->name, agent->path);
+	DBG("Releasing agent %s, %s", agent->name, agent->path);
 
 	if (agent->request)
 		agent_cancel(agent);
@@ -120,7 +124,7 @@ static int send_cancel_request(struct agent_request *req)
 	return 0;
 }
 
-static void agent_request_free(struct agent_request *req)
+static void agent_request_free(struct agent_request *req, gboolean destroy)
 {
 	if (req->msg)
 		dbus_message_unref(req->msg);
@@ -128,7 +132,7 @@ static void agent_request_free(struct agent_request *req)
 		dbus_pending_call_unref(req->call);
 	if (req->agent && req->agent->request)
 		req->agent->request = NULL;
-	if (req->destroy)
+	if (destroy && req->destroy)
 		req->destroy(req->user_data);
 	g_free(req);
 }
@@ -137,12 +141,14 @@ static void agent_exited(DBusConnection *conn, void *user_data)
 {
 	struct agent *agent = user_data;
 
-	debug("Agent exited without calling Unregister");
+	DBG("Agent exited without calling Unregister");
 
-	agent_destroy(agent, TRUE);
+	agent->exited = TRUE;
+
+	agent_free(agent);
 }
 
-static void agent_free(struct agent *agent)
+void agent_free(struct agent *agent)
 {
 	if (!agent)
 		return;
@@ -186,7 +192,8 @@ static void agent_free(struct agent *agent)
 
 struct agent *agent_create(struct btd_adapter *adapter, const char *name,
 				const char *path, uint8_t capability,
-				agent_remove_cb cb, void *remove_cb_data)
+				gboolean oob, agent_remove_cb cb,
+				void *remove_cb_data)
 {
 	struct agent *agent;
 
@@ -196,6 +203,7 @@ struct agent *agent_create(struct btd_adapter *adapter, const char *name,
 	agent->name = g_strdup(name);
 	agent->path = g_strdup(path);
 	agent->capability = capability;
+	agent->oob = oob;
 	agent->remove_cb = cb;
 	agent->remove_cb_data = remove_cb_data;
 
@@ -204,16 +212,6 @@ struct agent *agent_create(struct btd_adapter *adapter, const char *name,
 							NULL);
 
 	return agent;
-}
-
-int agent_destroy(struct agent *agent, gboolean exited)
-{
-	if (!agent)
-		return 0;
-
-	agent->exited = exited;
-	agent_free(agent);
-	return 0;
 }
 
 static struct agent_request *agent_request_new(struct agent *agent,
@@ -246,7 +244,7 @@ int agent_cancel(struct agent *agent)
 	if (!agent->exited)
 		send_cancel_request(agent->request);
 
-	agent_request_free(agent->request);
+	agent_request_free(agent->request, TRUE);
 	agent->request = NULL;
 
 	return 0;
@@ -302,7 +300,7 @@ done:
 	dbus_message_unref(message);
 
 	agent->request = NULL;
-	agent_request_free(req);
+	agent_request_free(req, TRUE);
 }
 
 static int agent_call_authorize(struct agent_request *req,
@@ -351,13 +349,68 @@ int agent_authorize(struct agent *agent,
 
 	err = agent_call_authorize(req, path, uuid);
 	if (err < 0) {
-		agent_request_free(req);
-		return DBUS_HANDLER_RESULT_NEED_MEMORY;
+		agent_request_free(req, FALSE);
+		return -ENOMEM;
 	}
 
 	agent->request = req;
 
-	debug("authorize request was sent for %s", path);
+	DBG("authorize request was sent for %s", path);
+
+	return 0;
+}
+
+
+static int agent_call_oob_availability(struct agent_request *req,
+					const char *device_path)
+{
+	struct agent *agent = req->agent;
+
+	req->msg = dbus_message_new_method_call(agent->name, agent->path,
+				"org.bluez.Agent", "OutOfBandAvailable");
+	if (!req->msg) {
+		error("Couldn't allocate D-Bus message");
+		return -ENOMEM;
+	}
+
+	dbus_message_append_args(req->msg,
+				DBUS_TYPE_OBJECT_PATH, &device_path,
+				DBUS_TYPE_INVALID);
+
+	if (dbus_connection_send_with_reply(connection, req->msg,
+					&req->call, REQUEST_TIMEOUT) == FALSE) {
+		error("D-Bus send failed");
+		return -EIO;
+	}
+
+	dbus_pending_call_set_notify(req->call, simple_agent_reply, req, NULL);
+	return 0;
+}
+
+int agent_request_oob_availability(struct agent *agent,
+					const char *path,
+					agent_cb cb,
+					void *user_data,
+					GDestroyNotify destroy)
+{
+	struct agent_request *req;
+	int err;
+
+	if (agent->request)
+		return -EBUSY;
+
+	req = agent_request_new(agent, AGENT_REQUEST_OOB_AVAILABILITY, cb,
+							user_data, destroy);
+
+	err = agent_call_oob_availability(req, path);
+	if (err < 0) {
+		agent_request_free(req, FALSE);
+		return -ENOMEM;
+	}
+
+	agent->request = req;
+
+	DBG("oob availability request was sent for %s", path);
 
 	return 0;
 }
@@ -429,7 +482,7 @@ done:
 
 	dbus_pending_call_cancel(req->call);
 	agent->request = NULL;
-	agent_request_free(req);
+	agent_request_free(req, TRUE);
 }
 
 static int pincode_request_new(struct agent_request *req, const char *device_path,
@@ -520,7 +573,7 @@ int agent_confirm_mode_change(struct agent *agent, const char *new_mode,
 	if (agent->request)
 		return -EBUSY;
 
-	debug("Calling Agent.ConfirmModeChange: name=%s, path=%s, mode=%s",
+	DBG("Calling Agent.ConfirmModeChange: name=%s, path=%s, mode=%s",
 			agent->name, agent->path, new_mode);
 
 	req = agent_request_new(agent, AGENT_REQUEST_CONFIRM_MODE,
@@ -535,7 +588,7 @@ int agent_confirm_mode_change(struct agent *agent, const char *new_mode,
 	return 0;
 
 failed:
-	agent_request_free(req);
+	agent_request_free(req, FALSE);
 	return err;
 }
 
@@ -586,7 +639,7 @@ done:
 
 	dbus_pending_call_cancel(req->call);
 	agent->request = NULL;
-	agent_request_free(req);
+	agent_request_free(req, TRUE);
 }
 
 static int passkey_request_new(struct agent_request *req,
@@ -625,7 +678,7 @@ int agent_request_passkey(struct agent *agent, struct btd_device *device,
 	if (agent->request)
 		return -EBUSY;
 
-	debug("Calling Agent.RequestPasskey: name=%s, path=%s",
+	DBG("Calling Agent.RequestPasskey: name=%s, path=%s",
 			agent->name, agent->path);
 
 	req = agent_request_new(agent, AGENT_REQUEST_PASSKEY, cb,
@@ -640,7 +693,113 @@ int agent_request_passkey(struct agent *agent, struct btd_device *device,
 	return 0;
 
 failed:
-	agent_request_free(req);
+	agent_request_free(req, FALSE);
+	return err;
+}
+
+static void oob_data_reply(DBusPendingCall *call, void *user_data)
+{
+	struct agent_request *req = user_data;
+	struct agent *agent = req->agent;
+	agent_oob_data_cb cb = req->cb;
+	DBusMessage *message;
+	DBusError err;
+	uint8_t *hash_ptr, *r_ptr;
+        uint8_t hash_len, r_len;
+
+	/* steal_reply will always return non-NULL since the callback
+	 * is only called after a reply has been received */
+	message = dbus_pending_call_steal_reply(call);
+
+	dbus_error_init(&err);
+	if (dbus_set_error_from_message(&err, message)) {
+		if ((g_str_equal(DBUS_ERROR_UNKNOWN_METHOD, err.name) ||
+				g_str_equal(DBUS_ERROR_NO_REPLY, err.name)) &&
+				request_fallback(req, oob_data_reply) == 0) {
+			dbus_error_free(&err);
+			return;
+		}
+
+		error("Agent replied with an error: %s, %s",
+				err.name, err.message);
+		cb(agent, &err, 0, 0, req->user_data);
+		dbus_error_free(&err);
+		goto done;
+	}
+
+	if (!dbus_message_get_args(message, &err,
+				DBUS_TYPE_ARRAY, DBUS_TYPE_BYTE, &hash_ptr, &hash_len,
+				DBUS_TYPE_ARRAY, DBUS_TYPE_BYTE, &r_ptr, &r_len,
+				DBUS_TYPE_INVALID)) {
+		error("Wrong OOB data reply signature: %s", err.message);
+		cb(agent, &err, 0, 0, req->user_data);
+		dbus_error_free(&err);
+		goto done;
+	}
+
+	cb(agent, NULL, hash_ptr, r_ptr, req->user_data);
+
+done:
+	if (message)
+		dbus_message_unref(message);
+
+	dbus_pending_call_cancel(req->call);
+	agent->request = NULL;
+	agent_request_free(req, TRUE);
+}
+
+static int oob_data_request_new(struct agent_request *req,
+				const char *device_path)
+{
+	struct agent *agent = req->agent;
+
+	req->msg = dbus_message_new_method_call(agent->name, agent->path,
+					"org.bluez.Agent", "RequestOobData");
+	if (req->msg == NULL) {
+		error("Couldn't allocate D-Bus message");
+		return -ENOMEM;
+	}
+
+	dbus_message_append_args(req->msg, DBUS_TYPE_OBJECT_PATH, &device_path,
+					DBUS_TYPE_INVALID);
+
+	if (dbus_connection_send_with_reply(connection, req->msg,
+					&req->call, REQUEST_TIMEOUT) == FALSE) {
+		error("D-Bus send failed");
+		return -EIO;
+	}
+
+	dbus_pending_call_set_notify(req->call, oob_data_reply, req, NULL);
+	return 0;
+}
+
+int agent_request_oob_data(struct agent *agent, struct btd_device *device,
+				agent_oob_data_cb cb, void *user_data,
+				GDestroyNotify destroy)
+{
+	struct agent_request *req;
+	const gchar *dev_path = device_get_path(device);
+	int err;
+
+	if (agent->request)
+		return -EBUSY;
+
+	DBG("Calling Agent.RequestOobData: name=%s, path=%s",
+			agent->name, agent->path);
+
+	req = agent_request_new(agent, AGENT_REQUEST_OOB_DATA, cb,
+							user_data, destroy);
+
+	err = oob_data_request_new(req, dev_path);
+	if (err < 0)
+		goto failed;
+
+	agent->request = req;
+
+	return 0;
+
+failed:
+	agent_request_free(req, FALSE);
 	return err;
 }
 
@@ -684,7 +843,7 @@ int agent_request_confirmation(struct agent *agent, struct btd_device *device,
 	if (agent->request)
 		return -EBUSY;
 
-	debug("Calling Agent.RequestConfirmation: name=%s, path=%s, passkey=%06u",
+	DBG("Calling Agent.RequestConfirmation: name=%s, path=%s, passkey=%06u",
 			agent->name, agent->path, passkey);
 
 	req = agent_request_new(agent, AGENT_REQUEST_CONFIRMATION, cb,
@@ -699,7 +858,64 @@ int agent_request_confirmation(struct agent *agent, struct btd_device *device,
 	return 0;
 
 failed:
-	agent_request_free(req);
+	agent_request_free(req, FALSE);
+	return err;
+}
+
+static int pairing_consent_request_new(struct agent_request *req,
+						const char *device_path)
+{
+	struct agent *agent = req->agent;
+
+	req->msg = dbus_message_new_method_call(agent->name, agent->path,
+				"org.bluez.Agent", "RequestPairingConsent");
+	if (req->msg == NULL) {
+		error("Couldn't allocate D-Bus message");
+		return -ENOMEM;
+	}
+
+	dbus_message_append_args(req->msg,
+				DBUS_TYPE_OBJECT_PATH, &device_path,
+				DBUS_TYPE_INVALID);
+
+	if (dbus_connection_send_with_reply(connection, req->msg,
+				&req->call, REQUEST_TIMEOUT) == FALSE) {
+		error("D-Bus send failed");
+		return -EIO;
+	}
+
+	dbus_pending_call_set_notify(req->call, simple_agent_reply, req, NULL);
+
+	return 0;
+}
+
+int agent_request_pairing_consent(struct agent *agent, struct btd_device *device,
+				agent_cb cb, void *user_data,
+				GDestroyNotify destroy)
+{
+	struct agent_request *req;
+	const gchar *dev_path = device_get_path(device);
+	int err;
+
+	if (agent->request)
+		return -EBUSY;
+
+	DBG("Calling Agent.RequestPairingConsent: name=%s, path=%s",
+			agent->name, agent->path);
+
+	req = agent_request_new(agent, AGENT_REQUEST_PAIRING_CONSENT, cb,
+				user_data, destroy);
+
+	err = pairing_consent_request_new(req, dev_path);
+	if (err < 0)
+		goto failed;
+
+	agent->request = req;
+
+	return 0;
+
+failed:
+	agent_request_free(req, FALSE);
 	return err;
 }
 
@@ -769,6 +985,11 @@ int agent_display_passkey(struct agent *agent, struct btd_device *device,
 uint8_t agent_get_io_capability(struct agent *agent)
 {
 	return agent->capability;
+}
+
+gboolean agent_get_oob_capability(struct agent *agent)
+{
+	return agent->oob;
 }
 
 gboolean agent_matches(struct agent *agent, const char *name, const char *path)

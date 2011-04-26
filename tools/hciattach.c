@@ -4,7 +4,7 @@
  *
  *  Copyright (C) 2000-2001  Qualcomm Incorporated
  *  Copyright (C) 2002-2003  Maxim Krasnyansky <maxk@qualcomm.com>
- *  Copyright (C) 2002-2009  Marcel Holtmann <marcel@holtmann.org>
+ *  Copyright (C) 2002-2010  Marcel Holtmann <marcel@holtmann.org>
  *
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -144,10 +144,10 @@ int set_speed(int fd, struct termios *ti, int speed)
 	return tcsetattr(fd, TCSANOW, ti);
 }
 
-/* 
+/*
  * Read an HCI event from the given file descriptor.
  */
-int read_hci_event(int fd, unsigned char* buf, int size) 
+int read_hci_event(int fd, unsigned char* buf, int size)
 {
 	int remain, r;
 	int count = 0;
@@ -175,9 +175,9 @@ int read_hci_event(int fd, unsigned char* buf, int size)
 	}
 
 	/* Now we read the parameters. */
-	if (buf[2] < (size - 3)) 
+	if (buf[2] < (size - 3))
 		remain = buf[2];
-	else 
+	else
 		remain = size - 3;
 
 	while ((count - 3) < remain) {
@@ -190,8 +190,8 @@ int read_hci_event(int fd, unsigned char* buf, int size)
 	return count;
 }
 
-/* 
- * Ericsson specific initialization 
+/*
+ * Ericsson specific initialization
  */
 static int ericsson(int fd, struct uart_t *u, struct termios *ti)
 {
@@ -245,8 +245,8 @@ static int ericsson(int fd, struct uart_t *u, struct termios *ti)
 	return 0;
 }
 
-/* 
- * Digianswer specific initialization 
+/*
+ * Digianswer specific initialization
  */
 static int digi(int fd, struct uart_t *u, struct termios *ti)
 {
@@ -304,7 +304,7 @@ static int read_check(int fd, void *buf, int count)
 	do {
 		res = read(fd, buf, count);
 		if (res != -1) {
-			buf += res; 
+			buf += res;
 			count -= res;
 		}
 	} while (count && (errno == 0 || errno == EINTR));
@@ -324,7 +324,8 @@ static int bcsp_max_retries = 10;
 static void bcsp_tshy_sig_alarm(int sig)
 {
 	unsigned char bcsp_sync_pkt[10] = {0xc0,0x00,0x41,0x00,0xbe,0xda,0xdc,0xed,0xed,0xc0};
-	int len, retries = 0;
+	int len;
+	static int retries = 0;
 
 	if (retries < bcsp_max_retries) {
 		retries++;
@@ -341,7 +342,8 @@ static void bcsp_tshy_sig_alarm(int sig)
 static void bcsp_tconf_sig_alarm(int sig)
 {
 	unsigned char bcsp_conf_pkt[10] = {0xc0,0x00,0x41,0x00,0xbe,0xad,0xef,0xac,0xed,0xc0};
-	int len, retries = 0;
+	int len;
+	static int retries = 0;
 
 	if (retries < bcsp_max_retries){
 		retries++;
@@ -478,8 +480,8 @@ static int bcsp(int fd, struct uart_t *u, struct termios *ti)
 	return 0;
 }
 
-/* 
- * CSR specific initialization 
+/*
+ * CSR specific initialization
  * Inspired strongly by code in OpenBT and experimentations with Brainboxes
  * Pcmcia card.
  * Jean Tourrilhes <jt@hpl.hp.com> - 14.11.01
@@ -542,7 +544,7 @@ static int csr(int fd, struct uart_t *u, struct termios *ti)
 			return -1;
 		}
 
-	/* Event code 0xFF is for vendor-specific events, which is 
+	/* Event code 0xFF is for vendor-specific events, which is
 	 * what we're looking for. */
 	} while (resp[1] != 0xFF);
 
@@ -558,7 +560,7 @@ static int csr(int fd, struct uart_t *u, struct termios *ti)
 	}
 #endif
 	/* Display that to user */
-	fprintf(stderr, "CSR build ID 0x%02X-0x%02X\n", 
+	fprintf(stderr, "CSR build ID 0x%02X-0x%02X\n",
 		resp[15] & 0xFF, resp[14] & 0xFF);
 
 	/* Try to read the current speed of the CSR chip */
@@ -586,7 +588,7 @@ static int csr(int fd, struct uart_t *u, struct termios *ti)
 			return -1;
 		}
 
-	/* Event code 0xFF is for vendor-specific events, which is 
+	/* Event code 0xFF is for vendor-specific events, which is
 	 * what we're looking for. */
 	} while (resp[1] != 0xFF);
 
@@ -600,7 +602,7 @@ static int csr(int fd, struct uart_t *u, struct termios *ti)
 #endif
 
 	if (u->speed > 1500000) {
-		fprintf(stderr, "Speed %d too high. Remaining at %d baud\n", 
+		fprintf(stderr, "Speed %d too high. Remaining at %d baud\n",
 			u->speed, u->init_speed);
 		u->speed = u->init_speed;
 	} else if (u->speed != 57600 && uart_speed(u->speed) == B57600) {
@@ -650,8 +652,111 @@ static int csr(int fd, struct uart_t *u, struct termios *ti)
 	return 0;
 }
 
-/* 
- * Silicon Wave specific initialization 
+/*
+ * CSR specific initialization extension for Audio(PCM) Interface Configuration
+ * of ROM based Chips. This function helps in configuring PCM interface
+ * according to requirement of different platforms.
+ * Anantha Idapalapati <aidapalapati@nvidia.com>
+ */
+static int csr_tegra(int fd, struct uart_t *u, struct termios *ti)
+{
+        uint8_t bccmd_payload[30], bccmd_header[10];
+        uint16_t payload_length=14;
+        uint16_t varid=0x5031;
+        int16_t command = 0x2;
+        int16_t seqnum=0;
+        uint16_t portid=1;
+        uint16_t syncport=0;
+        uint16_t iotype=5; // 5-I2S Master; 8-I2S Slave.
+        uint32_t readrate=8000;
+        uint32_t writerate=8000;
+        uint16_t size=0;
+        int  clen = 0;
+        uint8_t cp[254], resp[254];
+
+        // First, Do Link Establishment with CSR BC6 Chip
+        bcsp(fd, u, ti);
+
+        /* There is some configuration (like PCM interface configuration,
+        *  which user may need to be done after WARM_RESET of chip. WARM_RESET
+        *  is done as part of initialization. Do the configuration required
+        *  for runtime as part of this function.
+        */
+        //  CSR BCCMD Command Structure
+        //   =============================================================
+        //  |  Type  | Lenght | Seq. No | Var ID | Status | Payload       |
+        //   =============================================================
+        //  sample BCCMD packet for audio interface configuration
+        //  uint8_t cp[] = { 0xc0, 0xdb, 0xdc, 0x82, 0x1, 0xbc,
+        //      0x2, 0x0, 0xc, 0x0, 0x0, 0x0, 0x31, 0x50, 0x0, 0x0,
+        //      0x1, 0x0, 0x0, 0x0, 0x5, 0x0, 0x40, 0x1f, 0x0, 0x0,
+        //      0x40, 0x1f, 0x0, 0x0, 0x2d, 0xf2, 0xc0 };
+
+        // Payload format
+        memset(bccmd_payload, 0, sizeof(bccmd_payload));
+        bccmd_payload[0] = portid & 0xff;
+        bccmd_payload[1] = (portid & 0xff00) >> 8 ;
+        bccmd_payload[2] = syncport & 0xff;
+        bccmd_payload[3] = (syncport & 0xff00) >> 8 ;
+        bccmd_payload[4] = iotype & 0xff;
+        bccmd_payload[5] = (iotype  & 0xff00) >> 8;
+        bccmd_payload[6] = readrate & 0xff;
+        bccmd_payload[7] = (readrate & 0xff00) >> 8;
+        bccmd_payload[8] = (readrate & 0xff0000) >> 16;
+        bccmd_payload[9] = readrate >> 24;
+        bccmd_payload[10] = writerate & 0xff;
+        bccmd_payload[11] = (writerate & 0xff00) >> 8;
+        bccmd_payload[12] = (writerate & 0xff0000) >> 16;
+        bccmd_payload[13] = writerate >> 24;
+
+        // CSR BCC Header Formation
+        size = (payload_length < 8) ? 9 : ((payload_length + 1) / 2) + 5;
+        bccmd_header[0] = command & 0xff;
+        bccmd_header[1] = command >> 8;
+        bccmd_header[2] = size & 0xff;
+        bccmd_header[3] = size >> 8;
+        bccmd_header[4] = seqnum & 0xff;
+        bccmd_header[5] = seqnum >> 8;
+        bccmd_header[6] = varid & 0xff;
+        bccmd_header[7] = varid >> 8;
+        bccmd_header[8] = 0x00;
+        bccmd_header[9] = 0x00;
+        seqnum++; // needs to increment to be used in next
+
+        // BCSP Packet Formation
+        memset(cp, 0, sizeof(cp));
+        cp[0] = 0xC0;
+        cp[1] = 0xdb;
+        cp[2] = 0xdc;
+        cp[3] = 0x82;
+        cp[4] = 0x1;
+        cp[5] = 0xbc;
+        memcpy(cp + 6, bccmd_header, sizeof(bccmd_header));
+        memcpy(cp + 16, bccmd_payload, payload_length);
+        cp[16 + payload_length ] = 0x2d;
+        cp[16 + payload_length + 1] = 0xf2;
+        cp[16 + payload_length + 2] = 0xC0;
+        clen = 33;
+
+        // Send the Audio Config Command
+        memset(resp, 0, sizeof(resp));
+        if (write(fd, cp, clen) != clen) {
+                perror("Failed to write command (SET_BCCMD AUDIO_CONFIG)");
+                return -1;
+        }
+
+        /* Read command response */
+        if (read_hci_event(fd, resp, 100) < 0) {
+                perror("Failed to read response (SET_BCCMD AUDIO_CONFIG)");
+                return -1;
+        }
+
+        return 0;
+}
+
+
+/*
+ * Silicon Wave specific initialization
  * Thomas Moser <thomas.moser@tmoser.ch>
  */
 static int swave(int fd, struct uart_t *u, struct termios *ti)
@@ -667,7 +772,7 @@ static int swave(int fd, struct uart_t *u, struct termios *ti)
 	// Subcommand", e.g. "soft reset" to make the changes effective.
 
 	cmd[0] = HCI_COMMAND_PKT;	// it's a command packet
-	cmd[1] = 0x0B;			// OCF 0x0B	= param access set	
+	cmd[1] = 0x0B;			// OCF 0x0B	= param access set
 	cmd[2] = 0xfc;			// OGF bx111111 = vendor specific
 	cmd[3] = 0x06;			// 6 bytes of data following
 	cmd[4] = 0x01;			// param sub command
@@ -701,9 +806,9 @@ static int swave(int fd, struct uart_t *u, struct termios *ti)
 		return -1;
 	}
 
-	// We should wait for a "GET Event" to confirm the success of 
-	// the baud rate setting. Wait some time before reading. Better:  
-	// read with timeout, parse data 
+	// We should wait for a "GET Event" to confirm the success of
+	// the baud rate setting. Wait some time before reading. Better:
+	// read with timeout, parse data
 	// until correct answer, else error handling ... todo ...
 
 	nanosleep(&tm, NULL);
@@ -747,7 +852,7 @@ static int swave(int fd, struct uart_t *u, struct termios *ti)
 	// now the uart baud rate on the silicon wave module is set and effective.
 	// change our own baud rate as well. Then there is a reset event comming in
  	// on the *new* baud rate. This is *undocumented*! The packet looks like this:
-	// 04 FF 01 0B (which would make that a confirmation of 0x0B = "Param 
+	// 04 FF 01 0B (which would make that a confirmation of 0x0B = "Param
 	// subcommand class". So: change to new baud rate, read with timeout, parse
 	// data, error handling. BTW: all param access in Silicon Wave is done this way.
 	// Maybe this code would belong in a seperate file, or at least code reuse...
@@ -1007,6 +1112,7 @@ struct uart_t uart[] = {
 	{ "digi",       0x0000, 0x0000, HCI_UART_H4,   9600,   115200, FLOW_CTL, NULL, digi     },
 
 	{ "bcsp",       0x0000, 0x0000, HCI_UART_BCSP, 115200, 115200, 0,        NULL, bcsp     },
+        { "csr_tegra",  0x0000, 0x0000, HCI_UART_BCSP, 115200, 115200, 0,        NULL, csr_tegra },
 
 	/* Xircom PCMCIA cards: Credit Card Adapter and Real Port Adapter */
 	{ "xircom",     0x0105, 0x080a, HCI_UART_H4,   115200, 115200, FLOW_CTL, NULL, NULL     },
@@ -1093,10 +1199,14 @@ static struct uart_t * get_by_type(char *type)
 }
 
 /* Initialize UART driver */
-static int init_uart(char *dev, struct uart_t *u, int send_break)
+static int init_uart(char *dev, struct uart_t *u, int send_break, int raw)
 {
 	struct termios ti;
 	int fd, i;
+	unsigned long flags = 0;
+
+	if (raw)
+		flags |= 1 << HCI_UART_RAW_DEVICE;
 
 	fd = open(dev, O_RDWR | O_NOCTTY);
 	if (fd < 0) {
@@ -1155,6 +1265,11 @@ static int init_uart(char *dev, struct uart_t *u, int send_break)
 		return -1;
 	}
 
+	if (flags && ioctl(fd, HCIUARTSETFLAGS, flags) < 0) {
+		perror("Can't set UART flags");
+		return -1;
+	}
+
 	if (ioctl(fd, HCIUARTSETPROTO, u->proto) < 0) {
 		perror("Can't set device");
 		return -1;
@@ -1170,14 +1285,14 @@ static void usage(void)
 {
 	printf("hciattach - HCI UART driver initialization utility\n");
 	printf("Usage:\n");
-	printf("\thciattach [-n] [-p] [-b] [-t timeout] [-s initial_speed] <tty> <type | id> [speed] [flow|noflow] [bdaddr]\n");
+	printf("\thciattach [-n] [-p] [-b] [-r] [-t timeout] [-s initial_speed] <tty> <type | id> [speed] [flow|noflow] [bdaddr]\n");
 	printf("\thciattach -l\n");
 }
 
 int main(int argc, char *argv[])
 {
 	struct uart_t *u = NULL;
-	int detach, printpid, opt, i, n, ld, err;
+	int detach, printpid, raw, opt, i, n, ld, err;
 	int to = 10;
 	int init_speed = 0;
 	int send_break = 0;
@@ -1189,8 +1304,9 @@ int main(int argc, char *argv[])
 
 	detach = 1;
 	printpid = 0;
+	raw = 0;
 
-	while ((opt=getopt(argc, argv, "bnpt:s:l")) != EOF) {
+	while ((opt=getopt(argc, argv, "bnpt:s:lr")) != EOF) {
 		switch(opt) {
 		case 'b':
 			send_break = 1;
@@ -1218,6 +1334,10 @@ int main(int argc, char *argv[])
 							uart[i].m_id, uart[i].p_id);
 			}
 			exit(0);
+
+		case 'r':
+			raw = 1;
+			break;
 
 		default:
 			usage();
@@ -1257,7 +1377,7 @@ int main(int argc, char *argv[])
 				fprintf(stderr, "Unknown device type or id\n");
 				exit(1);
 			}
-			
+
 			break;
 
 		case 2:
@@ -1296,9 +1416,9 @@ int main(int argc, char *argv[])
 	alarm(to);
 	bcsp_max_retries = to;
 
-	n = init_uart(dev, u, send_break);
+	n = init_uart(dev, u, send_break, raw);
 	if (n < 0) {
-		perror("Can't initialize device"); 
+		perror("Can't initialize device");
 		exit(1);
 	}
 
